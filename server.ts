@@ -1,31 +1,36 @@
 import express, {
   Express,
   Request,
-  Response
+  Response,
 } from 'express';
-import { MongoClient } from 'mongodb';
 import { initDb } from './db';
 import { errorHandler } from './middleware/errorMiddleware';
-import { mongoMiddleware } from './middleware/mongoMiddleware';
+import morgan from 'morgan';
+import { Alert } from './models/alertModel';
 
-// Extend Express Request type to include MongoDB client
-declare global {
-  namespace Express {
-      interface Request {
-          db: MongoClient;
-      }
-  }
-}
+const app: Express = express();
+const port = 3000;
+
+// Setup basic middleware
+app.use(express.json());
+
+// Setup routes
+app.get('/', (_req: Request, res: Response) => {
+  res.send('Hello from Express + TypeScript!');
+});
+// http logging middleware
+app.use(morgan("dev"))
+// Error handler should always be the last middleware
+app.use(errorHandler);
 
 const startServer = async (): Promise<void> => {
   try {
-
+      // Initialize DB connection
       await initDb();
-      app.use(mongoMiddleware);
-
-      app.use(errorHandler);
-      
-
+      // Only start listening after everything is setup
+      app.listen(port, () => {
+          console.log(`Server running on port ${port}`);
+      });
 
   } catch (error) {
       console.error('Failed to start server:', error);
@@ -33,20 +38,7 @@ const startServer = async (): Promise<void> => {
   }
 };
 
-const app: Express = express();
-const port: number = process.env.PORT ? parseInt(process.env.PORT) : 3000;
-app.use(express.json());
-
-app.get('/', (_req: Request, res: Response) => {
-  res.send('Hello from Express + TypeScript!');
-});
 // Start the server
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
-
-
-
 startServer();
 
 // Handle process termination

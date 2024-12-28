@@ -1,8 +1,9 @@
 {
-  "type": "module",
   "dependencies": {
     "@types/express": "^5.0.0",
+    "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "mongodb": "6.12",
     "ts-node": "^10.9.2"
   },
   "devDependencies": {
@@ -24,7 +25,7 @@
   "main": "server.ts",
   "scripts": {
     "start": "npx ts-node server.ts",
-    "dev": "nodemon server.ts",
+    "dev": "npx nodemon server.ts",
     "build": "tsc",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

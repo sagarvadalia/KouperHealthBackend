@@ -9,6 +9,7 @@ import { Document } from "mongoose";
 import { isAuthenticated } from "../../middleware/authMiddleware";
 
 // TODO: UT for all routes
+// TODO: getter func for user
 
 type RequestWithName = Request<{}, {}, { userName: string }>;
 
@@ -21,6 +22,7 @@ const createUser = async (req: RequestWithName, res: Response, next: NextFunctio
             return;
         }
         const user = await User.create({ userName });
+        req.session.user = user as Document<UserSchema>;
         res.status(200).json({ message: "User created", user });
     } catch (error) {
         next(error);
@@ -52,11 +54,15 @@ const getAllUsers = async (req: Request, res: Response, next: NextFunction) => {
         next(error);
     }
 }
+
+const getUser = async (req: RequestWithName, res: Response, next: NextFunction) => {
+   res.status(200).json({user: req.session.user});
+}
 const router = Router();
 
 // TODO: fix to proper crud routes
 router.post('/create', createUser);
 router.post('/login', loginUser);
 router.get('/', isAuthenticated, getAllUsers);
-
+router.get('/currentUser', getUser);
 export { router as userRoutes };

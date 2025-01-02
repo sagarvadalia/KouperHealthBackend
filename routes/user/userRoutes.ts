@@ -22,7 +22,7 @@ const createUser = async (req: RequestWithName, res: Response, next: NextFunctio
             return;
         }
         const user = await User.create({ userName });
-        req.session.user = user as Document<UserSchema>;
+        req.session.user = user as UserSchema
         res.status(200).json({ message: "User created", user });
     } catch (error) {
         next(error);
@@ -39,7 +39,7 @@ const loginUser = async (req: RequestWithName, res: Response, next: NextFunction
             res.status(404).json({ message: "User not found" });
             return;
         }
-        req.session.user = user as Document<UserSchema>;
+        req.session.user =user as UserSchema
         res.status(200).json({ message: "User logged in", user });
     } catch (error) {
         next(error);

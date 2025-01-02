@@ -10,15 +10,18 @@ import {  UserSchema } from './models/userModel';
 import { userRoutes } from './routes/user/userRoutes';
 import session from 'express-session';
 import dotenv from 'dotenv';
-import { Document } from 'mongoose';
+import { uploadRouter } from './routes/pdfParsing/uploadthing';
+import { createRouteHandler } from 'uploadthing/express';
+import cors from 'cors';
+import { patientRoutes } from './routes/patient/patientRoutes';
 
 const app: Express = express();
 const port = 3000;
-
+// Load environment variables
+dotenv.config();
 // Setup basic middleware
 app.use(express.json());
- // Load environment variables
- dotenv.config();
+ 
     
  const { SESSION_SECRET } = process.env;
 
@@ -26,18 +29,24 @@ app.use(express.json());
     throw new Error('SESSION_SECRET not found in environment variables');
  }
 
+ // Enable CORS
+app.use(cors());
 
 // Add before other middleware
 app.use(session({
   secret: SESSION_SECRET,
   resave: false,
-  saveUninitialized: false
+  saveUninitialized: false,
+  cookie: { 
+    secure: false,
+    sameSite: 'lax'
+  }
 }));
 
 
 declare module 'express-session' {
   interface SessionData {
-    user: Document<UserSchema>
+    user: UserSchema
   }
 }
 
@@ -46,7 +55,23 @@ app.get('/api', (_req: Request, res: Response) => {
   res.send('Hello from Express + TypeScript!');
 });
 
+
+
+app.use(
+  "/api/uploadthing",
+  createRouteHandler({
+    router: uploadRouter,
+    config: {
+        token: process.env.UPLOADTHING_TOKEN,
+        isDev: true,
+        logLevel: "All",
+       
+        },
+  }),
+);
+
 app.use('/api/user', userRoutes);
+app.use('/api/patient', patientRoutes);
 // http logging middleware
 app.use(morgan("dev"))
 // Error handler should always be the last middleware

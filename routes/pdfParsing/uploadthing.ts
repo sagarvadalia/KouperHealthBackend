@@ -21,16 +21,6 @@ export const uploadRouter = {
       const doc = await pdfjs.getDocument(uint8Array).promise;
       // TODO: we should iterate over all the pages and get the text content
       const page = await doc.getPage(1);
-      const textContent = await page.getTextContent();
-      const text = textContent.items
-        .map((item) => {
-          if ("str" in item) {
-            return item.str;
-          }
-          return "";
-        })
-        .join(" ");
-
       const content = await page.getTextContent();
 
       const dataRows = parsePdfData(content);
@@ -94,10 +84,10 @@ function parsePdfData(content: any) {
           ?.text,
         epicId: rowItems.find((item: any) => Math.abs(item.x - epicIdHeaderRow.x) < 20)
           ?.text,
-        phone: formattedPhone,
+          phoneNumber: formattedPhone,
         attendingPhysician: attendingRow,
         primaryCareProvider: rowItems.find((item: any) => Math.abs(item.x - primaryCareProviderHeaderRow.x) < 20)?.text,
-        date: rowItems.find((item: any) => Math.abs(item.x - dateHeaderRow.x) < 20)?.text,
+        dischargeDate: rowItems.find((item: any) => Math.abs(item.x - dateHeaderRow.x) < 20)?.text,
         insurance: rowItems.find((item: any) => Math.abs(item.x - insuranceHeaderRow.x) < 20)?.text,
         disposition: rowItems.find((item: any) => Math.abs(item.x - dispositionHeaderRow.x) < 20)?.text,
       };

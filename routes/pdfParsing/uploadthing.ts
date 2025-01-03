@@ -44,15 +44,19 @@ export const uploadRouter = {
 
 // TODO: this whole function is super janky...NOT GREAT...Given the purposes of this coding challenge, it does the job for our given PDF but we need to find a better algo
 // TODO: this should have error handling and retry mechanisms
-async function parsePdfData(content: any) {
+function parsePdfData(content: any) {
   const items = content.items.map((item: any) => ({
     text: item.str,
     x: Math.round(item.transform[4]),
     y: Math.round(item.transform[5]),
   }));
-
   // Get header row
-  const headerRow = items.find((item: any) => item.text.includes("Name"));
+  const nameHeaderRow = items.find((item: any) => item.text.includes("Name"));
+  const epicIdHeaderRow = items.find((item: any) => item.text.includes("Epic Id"));
+  const dateHeaderRow = items.find((item: any) => item.text.includes("Date"));
+  const primaryCareProviderHeaderRow = items.find((item: any) => item.text.includes("Primary Care Provider"));
+  const insuranceHeaderRow = items.find((item: any) => item.text.includes("Insurance"));
+  const dispositionHeaderRow = items.find((item: any) => item.text.includes("Disposition"));
 
   const dataRows: any = {};
 
@@ -65,9 +69,9 @@ async function parsePdfData(content: any) {
 
   // Convert to array of records
   return Object.values(dataRows)
-    .filter((row: any) => row.length > 1) // Remove single-item rows
     .map((row: any) => {
       const rowItems = row.sort((a: any, b: any) => a.x - b.x);
+      // using regexes over x coords since the pdf is not aligned and the phone row bleeds into attending physician
       // finds either a 10 digit number or a phone number with dashes
       const phoneMatch = rowItems.find((item: any) =>
         /^\d{3}-?\d{3}-?\d{4}$/.test(item.text)
@@ -79,40 +83,24 @@ async function parsePdfData(content: any) {
       // TODO: we should probably use something like libPhoneNumber to format the phone number
       const formattedPhone = altPhoneMatch || phoneMatch;
 
+      // using regexes over x coords since the pdf is not aligned and the phone row bleeds into attending physician
       const attendingRow = rowItems.find((item: any) => {
         return item.text.includes("MD") || item.text.includes("PA");
-      })?.text;
+      })?.text?.replace(formattedPhone, "")
+      .trim();
 
-      // the x coordinate of the phone number is overlapping here so we hackily replace it
-      const attendingPhysician = attendingRow
-        ?.replace(formattedPhone, "")
-        .trim();
       return {
-        name: rowItems.find((item: any) => Math.abs(item.x - headerRow.x) < 20)
+        name: rowItems.find((item: any) => Math.abs(item.x - nameHeaderRow.x) < 20)
           ?.text,
-        epicId: rowItems.find((item: any) => item.text.startsWith("EP"))?.text,
+        epicId: rowItems.find((item: any) => Math.abs(item.x - epicIdHeaderRow.x) < 20)
+          ?.text,
         phone: formattedPhone,
-        attendingPhysician: attendingPhysician,
-        primaryCareProvider: rowItems.find((item: any) => {
-          const isPCP = item.text.includes("MD") || item.text.includes("PA");
-          // attending also uses isPCP so we need to ignore that
-          const notAttending =
-            item !== rowItems.find((i: any) => i.text === attendingRow);
-          return isPCP && notAttending;
-        })?.text,
-        date: rowItems.find((item: any) => /\d{2}-\d{2}-\d{4}/.test(item.text))
-          ?.text,
-        insurance: rowItems.find((item: any) =>
-          // TODO: we can use a library to get a list of insurance providers and then use that to match
-          ["BCBS", "Aetna Health", "Self Pay", "Humana Health"].includes(
-            item.text
-          )
-        )?.text,
-        // TODO: we can use a library to get a list of disposition types and then use that to match
-        disposition: rowItems.find((item: any) =>
-          ["Home", "HHS", "SNF"].includes(item.text)
-        )?.text,
+        attendingPhysician: attendingRow,
+        primaryCareProvider: rowItems.find((item: any) => Math.abs(item.x - primaryCareProviderHeaderRow.x) < 20)?.text,
+        date: rowItems.find((item: any) => Math.abs(item.x - dateHeaderRow.x) < 20)?.text,
+        insurance: rowItems.find((item: any) => Math.abs(item.x - insuranceHeaderRow.x) < 20)?.text,
+        disposition: rowItems.find((item: any) => Math.abs(item.x - dispositionHeaderRow.x) < 20)?.text,
       };
     })
-    .filter((record) => record.name && record.epicId); // Only return complete records
+    .filter((record) => record.name !== "Name" && record.name); // ignore the header row
 }

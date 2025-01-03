@@ -1,11 +1,8 @@
 import { User, UserSchema } from "../../models/userModel";
 import { Router, Request, Response, NextFunction } from "express";
-import { Document } from "mongoose";
 import { isAuthenticated } from "../../middleware/authMiddleware";
 
 // TODO: UT for all routes
-// TODO: getter func for user
-
 type RequestWithName = Request<{}, {}, { userName: string }>;
 
 const createUser = async (
@@ -28,8 +25,6 @@ const createUser = async (
   }
 };
 
-// TODO: figure out how to setup middleware to check if user is logged in
-// TODO: properly store the user on the session for consumption by the pdf parsing route
 const loginUser = async (
   req: RequestWithName,
   res: Response,

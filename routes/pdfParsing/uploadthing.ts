@@ -1,9 +1,9 @@
-import { createUploadthing, type FileRouter } from "uploadthing/express";
-import pdf from "pdf-parse";
 import pdfjs from "pdfjs-dist";
+import { createUploadthing } from "uploadthing/express";
 import { Patient } from "../../models/patientModel";
 const f = createUploadthing();
 
+// TODO: this should probably all be done in a worker node so we can scale without crashing the server.
 export const uploadRouter = {
   pdfUploader: f({ pdf: { maxFileSize: "4MB", maxFileCount: 1 } })
     .middleware(() => {
@@ -11,151 +11,108 @@ export const uploadRouter = {
       return { userId };
     })
     .onUploadComplete(async ({ metadata, file }) => {
+      // TODO: we should persist the fileUrl to the db and then mark the fileUrl as processed. Perhaps we also tag that by the title so we don't duplicate the work
       const response = await fetch(file.url);
-      if (!response.ok) throw new Error('Failed to fetch PDF');
+      if (!response.ok) throw new Error("Failed to fetch PDF");
       const arrayBuffer = await response.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-     
-      const doc = await pdfjs.getDocument(uint8Array).promise;
-    const page = await doc.getPage(1);
-      const textContent = await page.getTextContent();
-      const text = textContent.items.map(item => {
-        if ('str' in item) {
-          return item.str;
-        }
-        return '';
-      }).join(' ');
 
+      const uint8Array = new Uint8Array(arrayBuffer);
+
+      const doc = await pdfjs.getDocument(uint8Array).promise;
+      // TODO: we should iterate over all the pages and get the text content
+      const page = await doc.getPage(1);
+      const textContent = await page.getTextContent();
+      const text = textContent.items
+        .map((item) => {
+          if ("str" in item) {
+            return item.str;
+          }
+          return "";
+        })
+        .join(" ");
 
       const content = await page.getTextContent();
-  
-      const dataRows = parsePdfData(content)
-      // console.log("================")
-      // console.log(text)
-      // console.log("================")
-      console.log(dataRows)
-    })
 
+      const dataRows = parsePdfData(content);
+      // create the patient list
+      // TODO: we should have error handling here
+      // TODO: we should chunk these and perform this insert in batches
+      // TODO: this is where we would validate data fields like phone numbers using twilio
+      await Patient.create(dataRows);
+    }),
+};
 
-}
-
-
-export type OurFileRouter = typeof uploadRouter;
-
-// TODO: this whole function is super janky...NOT production ready....
-// TODO: it mostly works so I can use it while I iterate through the rest of the functionality
-// TODO: this should have error handling and retry mechanisms. We should probably persist the fileUrl to the db and the processed state
+// TODO: this whole function is super janky...NOT GREAT...Given the purposes of this coding challenge, it does the job for our given PDF but we need to find a better algo
+// TODO: this should have error handling and retry mechanisms
 async function parsePdfData(content: any) {
   const items = content.items.map((item: any) => ({
-    text: item.str.trim(),
+    text: item.str,
     x: Math.round(item.transform[4]),
-    y: Math.round(item.transform[5])
+    y: Math.round(item.transform[5]),
   }));
- 
+
+  // Get header row
+  const headerRow = items.find((item: any) => item.text.includes("Name"));
+
+  const dataRows: any = {};
+
   // Group items by y-coordinate
-  const rows: any = {};
   items.forEach((item: any) => {
-    if (!item.text || item.text === ' ') return;
-    if (!rows[item.y]) rows[item.y] = [];
-    rows[item.y].push(item);
+    if (!item.text || item.text === " ") return;
+    if (!dataRows[item.y]) dataRows[item.y] = [];
+    dataRows[item.y].push(item);
   });
- 
-  // Find header row
-  // @ts-ignore
-  const headerRow: any = Object.values(rows).find((row: any) => 
-    row.some((item: any) => item.text === 'Name')
-  ).sort((a: any, b: any) => a.x - b.x);
- 
-  const patientRecords = Object.values(rows)
-    .filter((row: any) => row.length > 1 && row !== headerRow)
+
+  // Convert to array of records
+  return Object.values(dataRows)
+    .filter((row: any) => row.length > 1) // Remove single-item rows
     .map((row: any) => {
       const rowItems = row.sort((a: any, b: any) => a.x - b.x);
-      return headerRow.reduce((record: any, header: any, index: any) => {
-        const nextHeader = headerRow[index + 1];
-        const value = rowItems.find((item:any) => {
-          const endX = nextHeader?.x || Infinity;
-            // For Date column, allow items slightly left
-            if (header.text === 'Date') {
-              return item.x >= header.x - 20 && (!nextHeader || item.x < nextHeader.x);
-            }
-          if (header.text === 'Phone number') {
-            // TODO: this is not working for Chris P Bacon
-            // Find item that contains phone number within column bounds
-            const phoneItem = rowItems.find((i:any) => i.x <= endX && /\d{3}-?\d{3}-?\d{4}|\d{10}/.test(i.text));
-            if (phoneItem) {
-              // Extract just the phone portion
-              const phoneMatch = phoneItem.text.match(/\d{3}-?\d{3}-?\d{4}|\d{10}/);
-              return phoneMatch[0];
-            }
-          }
- 
-          // Default column matching
-          return item.x >= header.x && (!nextHeader || item.x < nextHeader.x);
-         })?.text;
-         const key = header.text.toLowerCase().split(" ").map((word: string, index: number) => 
-          index === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1)
-        ).join("");
-        record[key] = value;
-        return record;
-      }, {});
-    }); 
-    console.log(patientRecords)
-    Patient.create(patientRecords)
- }
+      // finds either a 10 digit number or a phone number with dashes
+      const phoneMatch = rowItems.find((item: any) =>
+        /^\d{3}-?\d{3}-?\d{4}$/.test(item.text)
+      )?.text;
+      const altPhoneMatch = rowItems
+        .find((item: any) => /\d{10}/.test(item.text))
+        ?.text.slice(0, 10);
 
+      // TODO: we should probably use something like libPhoneNumber to format the phone number
+      const formattedPhone = altPhoneMatch || phoneMatch;
 
+      const attendingRow = rowItems.find((item: any) => {
+        return item.text.includes("MD") || item.text.includes("PA");
+      })?.text;
 
-
-
-
-
-// TODO: this is the old function that I used to use before I switched to pdfjs
-// async function parsePdfData(content: any) {
-//   const items = content.items.map((item: any) => ({
-//     text: item.str.trim(),
-//     x: Math.round(item.transform[4]),
-//     y: Math.round(item.transform[5])
-//   }));
-
-//   // Get header row and data rows
-//   const headerRow = items.find((item: any) => item.text.includes("Name"));
-//   const dataRows: any = {};
-
-//   // Group items by y-coordinate
-//   items.forEach((item: any) => {
-//     if (!item.text || item.text === ' ') return;
-//     // @ts-ignore
-//     if (!dataRows[item.y]) dataRows[item.y] = [];
-//     // @ts-ignore
-//     dataRows[item.y].push(item);
-//   });
-
-//   // Convert to array of records
-//   return Object.values(dataRows)
-//     .filter((row: any) => row.length > 1) // Remove single-item rows
-//     .map((row: any) => {
-//       const rowItems = row.sort((a: any, b: any) => a.x - b.x);
-//       const phoneMatch = rowItems.find((item: any) => /^\d{3}-?\d{3}-?\d{4}$/.test(item.text))?.text;
-// const formattedPhone = phoneMatch?.includes('-') ? phoneMatch : 
-//  phoneMatch?.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
-
-// const attendingPhysician = rowItems.find((item: any) => 
-//  (item.text.includes('MD') || item.text.includes('PA')) && 
-//  !item.text.includes(phoneMatch))?.text;
-//       return {
-//         name: rowItems.find((item: any) => Math.abs(item.x - headerRow.x) < 20)?.text,
-//         epicId: rowItems.find((item: any) => item.text.startsWith('EP'))?.text,
-//         phone: formattedPhone,
-//         attendingPhysician: attendingPhysician,
-//         primaryCareProvider: rowItems.find((item: any) => {
-//           const isPCP = item.text.includes('MD') || item.text.includes('PA');
-//           const notAttending = item !== rowItems.find((i: any) => i.text === attendingPhysician);
-//           return isPCP && notAttending;
-//          })?.text,
-//         date: rowItems.find((item: any) => /\d{2}-\d{2}-\d{4}/.test(item.text))?.text,
-//         insurance: rowItems.find((item: any) => ['BCBS', 'Aetna Health', 'Self Pay', 'Humana Health'].includes(item.text))?.text,
-//         disposition: rowItems.find((item: any) => ['Home', 'HHS', 'SNF'].includes(item.text))?.text
-//       };
-//     })
-//     .filter(record => record.name && record.epicId); // Only return complete records
-// }
+      // the x coordinate of the phone number is overlapping here so we hackily replace it
+      const attendingPhysician = attendingRow
+        ?.replace(formattedPhone, "")
+        .trim();
+      return {
+        name: rowItems.find((item: any) => Math.abs(item.x - headerRow.x) < 20)
+          ?.text,
+        epicId: rowItems.find((item: any) => item.text.startsWith("EP"))?.text,
+        phone: formattedPhone,
+        attendingPhysician: attendingPhysician,
+        primaryCareProvider: rowItems.find((item: any) => {
+          const isPCP = item.text.includes("MD") || item.text.includes("PA");
+          // attending also uses isPCP so we need to ignore that
+          const notAttending =
+            item !== rowItems.find((i: any) => i.text === attendingRow);
+          return isPCP && notAttending;
+        })?.text,
+        date: rowItems.find((item: any) => /\d{2}-\d{2}-\d{4}/.test(item.text))
+          ?.text,
+        insurance: rowItems.find((item: any) =>
+          // TODO: we can use a library to get a list of insurance providers and then use that to match
+          ["BCBS", "Aetna Health", "Self Pay", "Humana Health"].includes(
+            item.text
+          )
+        )?.text,
+        // TODO: we can use a library to get a list of disposition types and then use that to match
+        disposition: rowItems.find((item: any) =>
+          ["Home", "HHS", "SNF"].includes(item.text)
+        )?.text,
+      };
+    })
+    .filter((record) => record.name && record.epicId); // Only return complete records
+}
